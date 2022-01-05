@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CommandLine;
 using Google.OrTools.LinearSolver;
 using Ozzah.SeatingPlanOptimization.Model;
@@ -32,7 +33,10 @@ namespace Ozzah.SeatingPlanOptimization
 					options.ModelFilePath,
 					phase1Problem.Solver.ExportModelAsLpFormat(false));
 			}
-			phase1Problem.Solver.Solve();
+			var solveTask = Task.Run(() => phase1Problem.Solver.Solve());
+			Console.CancelKeyPress += (sender, args) => phase1Problem.Solver.InterruptSolve();
+			Task.WaitAll(solveTask);
+			
 			WriteSolution(tables, guests, phase1Problem, pairingCoefficients, options);
 		}
 
@@ -105,7 +109,7 @@ namespace Ozzah.SeatingPlanOptimization
 			IDictionary<(Guest, Guest), double> pairingCoefficients,
 			CommandLineOptions options)
 		{
-			var problem = new SeatingProblem();
+			var problem = new SeatingProblem(options.SolverType);
 
 			CreateGuestToTableVariables(tables, guests, problem);
 			CreateTableCapacityConstraints(tables, guests, problem);

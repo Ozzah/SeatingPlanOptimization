@@ -1,4 +1,5 @@
 ﻿using CommandLine;
+using Ozzah.SeatingPlanOptimization.Model;
 
 namespace Ozzah.SeatingPlanOptimization
 {
@@ -17,6 +18,14 @@ namespace Ozzah.SeatingPlanOptimization
 			Required = true,
 			HelpText = "Path the the file containing guest information")]
 		public string? GuestsFilePath { get; set; }
+		
+		[Option(
+			longName: "SolverType",
+			shortName: 's',
+			Required = false,
+			Default = MixedIntegerSolver.SCIP_MIXED_INTEGER_PROGRAMMING,
+			HelpText = "The solver to use")]
+		public MixedIntegerSolver SolverType { get; set; }
 		
 		[Option(
 			longName: "Threads",
