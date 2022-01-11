@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using Google.OrTools.Algorithms;
 using Google.OrTools.LinearSolver;
 
 namespace Ozzah.SeatingPlanOptimization.Model
@@ -12,11 +11,21 @@ namespace Ozzah.SeatingPlanOptimization.Model
 
 		public Variable[,,]? GuestWithGuestToTable { get; set; }
 
-		public HashSet<Constraint> Constraints { get; } = new();
+		public Variable? PoorestGuestReward { get; set; }
+		public Variable[]? GuestReward { get; set; }
+
+		HashSet<Constraint> Constraints { get; } = new();
 
 		public SeatingProblem(MixedIntegerSolver solverType)
 		{
 			Solver = Solver.CreateSolver(solverType.ToString());
+		}
+
+		public Constraint MakeConstraint(double lowerBound, double upperBound, string name)
+		{
+			var constraint = Solver.MakeConstraint(lowerBound, upperBound, name);
+			Constraints.Add(constraint);
+			return constraint;
 		}
 	}
 }

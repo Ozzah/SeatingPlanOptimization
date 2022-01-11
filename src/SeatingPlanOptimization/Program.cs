@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using CommandLine;
 using Google.OrTools.LinearSolver;
@@ -17,27 +18,37 @@ namespace Ozzah.SeatingPlanOptimization
 				.Default
 				.ParseArguments<CommandLineOptions>(args);
 
-			parserResult.WithParsed(options => SolveProblem(options));
+			parserResult.WithParsed(SolveSeatingProblem);
 		}
 
-		static void SolveProblem(CommandLineOptions options)
+		static void SolveSeatingProblem(CommandLineOptions options)
 		{
 			var tables = ReadTablesFile(options.TablesFilePath!);
 			var guests = ReadGuestList(options.GuestsFilePath!);
 			var pairingCoefficients = ReadPairingCoefficients(options.GuestsFilePath!, guests);
-			
+
+			var solverParams = GetSolverParams(options);
+
 			var phase1Problem = SetUpProblemPhase1(tables, guests, pairingCoefficients, options);
-			if (!string.IsNullOrWhiteSpace(options.ModelFilePath))
+			SolveSeatingProblem(phase1Problem, solverParams);
+			if (!string.IsNullOrEmpty(options.Phase1ResultsFilePath))
 			{
-				File.WriteAllText(
-					options.ModelFilePath,
-					phase1Problem.Solver.ExportModelAsLpFormat(false));
+				WriteSeatingPlan(
+					tables,
+					guests,
+					phase1Problem,
+					pairingCoefficients,
+					options.Phase1ResultsFilePath);
 			}
-			var solveTask = Task.Run(() => phase1Problem.Solver.Solve());
-			Console.CancelKeyPress += (sender, args) => phase1Problem.Solver.InterruptSolve();
-			Task.WaitAll(solveTask);
-			
-			WriteSolution(tables, guests, phase1Problem, pairingCoefficients, options);
+
+			var phase2Problem = SetUpProblemPhase2(tables, guests, pairingCoefficients, phase1Problem, options);
+			SolveSeatingProblem(phase2Problem, solverParams);
+			WriteSeatingPlan(
+				tables,
+				guests,
+				phase2Problem,
+				pairingCoefficients,
+				options.Phase2ResultsFilePath!);
 		}
 
 		static IList<Table> ReadTablesFile(string tablesFilePath)
@@ -46,7 +57,7 @@ namespace Ozzah.SeatingPlanOptimization
 			{
 				throw new InvalidOperationException($"Table file '{tablesFilePath}' does not exist");
 			}
-			
+
 			return File.ReadLines(tablesFilePath)
 				.Skip(1)
 				.Select(line => line.Split('\t'))
@@ -73,7 +84,9 @@ namespace Ozzah.SeatingPlanOptimization
 				.ToList();
 		}
 
-		static IDictionary<(Guest, Guest), double> ReadPairingCoefficients(string guestsFilePath, IList<Guest> guests)
+		static IDictionary<(Guest, Guest), double> ReadPairingCoefficients(
+			string guestsFilePath,
+			IList<Guest> guests)
 		{
 			if (!File.Exists(guestsFilePath))
 			{
@@ -91,7 +104,7 @@ namespace Ozzah.SeatingPlanOptimization
 				{
 					var idx = tup.idx;
 					var line = tup.line;
-					
+
 					for (var jdx = idx + 1; jdx < guests.Count; jdx++)
 					{
 						pairingCoefficients.Add(
@@ -114,16 +127,48 @@ namespace Ozzah.SeatingPlanOptimization
 			CreateGuestToTableVariables(tables, guests, problem);
 			CreateTableCapacityConstraints(tables, guests, problem);
 			CreateGuestAssignmentConstraints(tables, guests, problem);
-			CreateLinearizationScheme(tables, guests, pairingCoefficients, problem);
-			
+			CreateLinearizationScheme(tables, guests, problem);
+
 			CreateObjectiveFunctionPhase1(tables, guests, pairingCoefficients, problem);
-			
-			SetUpSolverParameters(options, problem);
+
+			ConfigureSolver(options, problem);
 
 			return problem;
 		}
-		
-		static void CreateGuestToTableVariables(IList<Table> tables, IList<Guest> guests, SeatingProblem problem)
+
+		static SeatingProblem SetUpProblemPhase2(
+			IList<Table> tables,
+			IList<Guest> guests,
+			IDictionary<(Guest, Guest), double> pairingCoefficients,
+			SeatingProblem phase1Problem,
+			CommandLineOptions options)
+		{
+			var problem = new SeatingProblem(options.SolverType);
+
+			CreateGuestToTableVariables(tables, guests, problem);
+			CreateTableCapacityConstraints(tables, guests, problem);
+			CreateGuestAssignmentConstraints(tables, guests, problem);
+			CreateLinearizationScheme(tables, guests, problem);
+			RestrictPhase2WithRespectToPhase1Objective(
+				tables,
+				guests,
+				pairingCoefficients,
+				phase1Problem.Solver.Objective().Value(),
+				options,
+				problem);
+
+			CreateObjectiveFunctionPhase2(tables, guests, pairingCoefficients, problem);
+			SetPhase2Hint(tables, guests, phase1Problem, problem);
+
+			ConfigureSolver(options, problem);
+
+			return problem;
+		}
+
+		static void CreateGuestToTableVariables(
+			IList<Table> tables,
+			IList<Guest> guests,
+			SeatingProblem problem)
 		{
 			problem.GuestToTable = new Variable[guests.Count, tables.Count];
 			for (var j = 0; j < guests.Count; j++)
@@ -135,15 +180,14 @@ namespace Ozzah.SeatingPlanOptimization
 			}
 		}
 
-		static void CreateTableCapacityConstraints(IList<Table> tables, IList<Guest> guests, SeatingProblem problem)
+		static void CreateTableCapacityConstraints(
+			IList<Table> tables,
+			IList<Guest> guests,
+			SeatingProblem problem)
 		{
 			for (var k = 0; k < tables.Count; k++)
 			{
-				var constraint = problem.Solver.MakeConstraint(
-					tables[k].MinimumGuests,
-					tables[k].MaximumGuests,
-					$"__Table_{k}");
-				problem.Constraints.Add(constraint);
+				var constraint = problem.MakeConstraint(tables[k].MinimumGuests, tables[k].MaximumGuests, $"__Table_{k}");
 
 				for (var j = 0; j < guests.Count; j++)
 				{
@@ -159,11 +203,10 @@ namespace Ozzah.SeatingPlanOptimization
 		{
 			for (var j = 0; j < guests.Count; j++)
 			{
-				var constraint = problem.Solver.MakeConstraint(
+				var constraint = problem.MakeConstraint(
 					1.0,
 					1.0,
 					$"__Guest_{j}");
-				problem.Constraints.Add(constraint);
 
 				for (var k = 0; k < tables.Count; k++)
 				{
@@ -171,11 +214,10 @@ namespace Ozzah.SeatingPlanOptimization
 				}
 			}
 		}
-		
+
 		static void CreateLinearizationScheme(
 			IList<Table> tables,
 			IList<Guest> guests,
-			IDictionary<(Guest, Guest), double> pairingCoefficients,
 			SeatingProblem problem)
 		{
 			problem.GuestWithGuestToTable = new Variable[guests.Count, guests.Count, tables.Count];
@@ -187,30 +229,27 @@ namespace Ozzah.SeatingPlanOptimization
 					{
 						problem.GuestWithGuestToTable[i, j, k] = problem.Solver.MakeBoolVar($"Assignment__{i}_{j}_{k}");
 
-						var linearizationConstraint1 = problem.Solver.MakeConstraint(
+						var linearizationConstraint1 = problem.MakeConstraint(
 							double.NegativeInfinity,
 							0.0,
 							$"__Linearize1_{i}_{j}_{k}");
 						linearizationConstraint1.SetCoefficient(problem.GuestWithGuestToTable[i, j, k], 1.0);
 						linearizationConstraint1.SetCoefficient(problem.GuestToTable![i, k], -1.0);
-						problem.Constraints.Add(linearizationConstraint1);
 
-						var linearizationConstraint2 = problem.Solver.MakeConstraint(
+						var linearizationConstraint2 = problem.MakeConstraint(
 							double.NegativeInfinity,
 							0.0,
 							$"__Linearize2_{i}_{j}_{k}");
 						linearizationConstraint2.SetCoefficient(problem.GuestWithGuestToTable[i, j, k], 1.0);
 						linearizationConstraint2.SetCoefficient(problem.GuestToTable[j, k], -1.0);
-						problem.Constraints.Add(linearizationConstraint2);
 
-						var linearizationConstraint3 = problem.Solver.MakeConstraint(
+						var linearizationConstraint3 = problem.MakeConstraint(
 							-1.0,
 							double.PositiveInfinity,
 							$"__Linearize3_{i}_{j}_{k}");
 						linearizationConstraint3.SetCoefficient(problem.GuestWithGuestToTable[i, j, k], 1.0);
 						linearizationConstraint3.SetCoefficient(problem.GuestToTable[i, k], -1.0);
 						linearizationConstraint3.SetCoefficient(problem.GuestToTable[j, k], -1.0);
-						problem.Constraints.Add(linearizationConstraint3);
 					}
 				}
 			}
@@ -234,11 +273,122 @@ namespace Ozzah.SeatingPlanOptimization
 					}
 				}
 			}
-			
+
 			problem.Solver.Objective().SetOptimizationDirection(maximize: true);
 		}
 
-		static void SetUpSolverParameters(CommandLineOptions options, SeatingProblem problem)
+		static void RestrictPhase2WithRespectToPhase1Objective(
+			IList<Table> tables,
+			IList<Guest> guests,
+			IDictionary<(Guest, Guest), double> pairingCoefficients,
+			double objectiveValuePhase1,
+			CommandLineOptions options,
+			SeatingProblem problem)
+		{
+			var constraint = problem.MakeConstraint(
+				options.Phase2Tolerances * objectiveValuePhase1,
+				objectiveValuePhase1 + options.MipGap,
+				"__Z1");
+			for (var i = 0; i < guests.Count; i++)
+			{
+				for (var j = i + 1; j < guests.Count; j++)
+				{
+					for (var k = 0; k < tables.Count; k++)
+					{
+						constraint.SetCoefficient(
+							problem.GuestWithGuestToTable![i, j, k],
+							pairingCoefficients[(guests[i], guests[j])]);
+					}
+				}
+			}
+		}
+
+		static void CreateObjectiveFunctionPhase2(
+			IList<Table> tables,
+			IList<Guest> guests,
+			IDictionary<(Guest, Guest), double> pairingCoefficients,
+			SeatingProblem problem)
+		{
+			problem.PoorestGuestReward = problem.Solver.MakeNumVar(double.NegativeInfinity, double.PositiveInfinity, "Z2");
+
+			problem.GuestReward = new Variable[guests.Count];
+			for (var i = 0; i < guests.Count; i++)
+			{
+				problem.GuestReward[i] = problem.Solver.MakeNumVar(double.NegativeInfinity, double.PositiveInfinity, $"Z2_{i}");
+
+				var guestConstraint = problem.MakeConstraint(0.0, 0.0, $"__Z2_{i}");
+				guestConstraint.SetCoefficient(problem.GuestReward[i], 1.0);
+				for (var j = 0; j < guests.Count; j++)
+				{
+					if (i == j)
+					{
+						continue;
+					}
+
+					for (var k = 0; k < tables.Count; k++)
+					{
+						var _i = Math.Min(i, j);
+						var _j = Math.Max(i, j);
+
+						guestConstraint.SetCoefficient(
+							problem.GuestWithGuestToTable![_i, _j, k],
+							-pairingCoefficients[(guests[_i], guests[_j])]);
+					}
+				}
+
+				var totalConstraint = problem.MakeConstraint(double.NegativeInfinity, 0.0, $"__Z_Z2_{i}");
+				totalConstraint.SetCoefficient(problem.PoorestGuestReward, 1.0);
+				totalConstraint.SetCoefficient(problem.GuestReward[i], -1.0);
+			}
+
+			problem.Solver.Objective().SetCoefficient(problem.PoorestGuestReward, 1.0);
+			problem.Solver.Objective().SetOptimizationDirection(maximize: true);
+		}
+
+		static void SetPhase2Hint(
+			IList<Table> tables,
+			IList<Guest> guests,
+			SeatingProblem phase1Problem,
+			SeatingProblem problem)
+		{
+			var hint = new Dictionary<Variable, double>();
+
+			for (var j = 0; j < guests.Count; j++)
+			{
+				for (var k = 0; k < tables.Count; k++)
+				{
+					hint.Add(
+						problem.GuestToTable![j, k],
+						phase1Problem.GuestToTable![j, k].SolutionValue() > 0.5 ? 1.0 : 0.0);
+				}
+			}
+
+			for (var i = 0; i < guests.Count; i++)
+			{
+				for (var j = i + 1; j < guests.Count; j++)
+				{
+					for (var k = 0; k < tables.Count; k++)
+					{
+						hint.Add(
+							problem.GuestWithGuestToTable![i, j, k],
+							phase1Problem.GuestWithGuestToTable![i, j, k].SolutionValue() > 0.5 ? 1.0 : 0.0);
+					}
+				}
+			}
+
+			problem.Solver.SetHint(
+				hint.Keys.ToArray(),
+				hint.Values.ToArray());
+		}
+
+		static MPSolverParameters GetSolverParams(CommandLineOptions options)
+		{
+			var solverParams = new MPSolverParameters();
+			solverParams.SetDoubleParam(MPSolverParameters.DoubleParam.RELATIVE_MIP_GAP, options.MipGap);
+			return solverParams;
+		}
+
+		static void ConfigureSolver(CommandLineOptions options, SeatingProblem problem)
 		{
 			problem.Solver.EnableOutput();
 			if (options.NumThreads > 0)
@@ -250,28 +400,40 @@ namespace Ozzah.SeatingPlanOptimization
 				problem.Solver.SetTimeLimit(options.TimeLimitMinutes * 60000L);
 			}
 		}
-		
-		static void WriteSolution(
+
+		static SeatingProblem SolveSeatingProblem(
+			SeatingProblem seatingProblem,
+			MPSolverParameters solverParams)
+		{
+			ConsoleCancelEventHandler cancelHandler = (_, _) => seatingProblem.Solver.InterruptSolve();
+			var solveTask = Task.Run(() => seatingProblem.Solver.Solve(solverParams));
+			Console.CancelKeyPress += cancelHandler;
+			Task.WaitAll(solveTask);
+			Console.CancelKeyPress -= cancelHandler;
+			return seatingProblem;
+		}
+
+		static void WriteSeatingPlan(
 			IList<Table> tables,
 			IList<Guest> guests,
 			SeatingProblem problem,
 			IDictionary<(Guest, Guest), double> pairingCoefficients,
-			CommandLineOptions options)
+			string resultsPath)
 		{
 			var solutionValue = 0.0;
-			
-			using var writer = new StreamWriter(options.ResultsFilePath!);
+
+			using var writer = new StreamWriter(resultsPath);
 			for (var k = 0; k < tables.Count; k++)
 			{
 				var tableValue = 0.0;
-				
-				writer.WriteLine($"TABLE {k + 1}:");
+
+				var tableBuilder = new StringBuilder();
 				for (var j = 0; j < guests.Count; j++)
 				{
 					if (problem.GuestToTable![j, k].SolutionValue() > 0.9)
 					{
 						var guestValue = 0.0;
-						
+
 						for (var i = 0; i < guests.Count; i++)
 						{
 							if (i != j)
@@ -279,23 +441,24 @@ namespace Ozzah.SeatingPlanOptimization
 								var iMin = Math.Min(i, j);
 								var jMax = Math.Max(i, j);
 
-								guestValue += 
+								guestValue +=
 									pairingCoefficients[(guests[iMin], guests[jMax])] *
 									problem.GuestWithGuestToTable![iMin, jMax, k].SolutionValue();
 							}
 						}
-						
-						writer.WriteLine($"\t{guests[j].Name} ({guestValue})");
+
+						tableBuilder.Append($"\t{guests[j].Name} ({guestValue})\n");
 						tableValue += guestValue;
 					}
 				}
-				
-				writer.WriteLine($"Table Value: {tableValue}");
+
+				writer.WriteLine($"TABLE {k + 1} ({tableValue})");
+				writer.Write(tableBuilder.ToString());
 				solutionValue += tableValue;
-				
+
 				writer.WriteLine(string.Empty);
 			}
-			
+
 			writer.WriteLine($"Solution Value: {solutionValue}");
 		}
 	}
