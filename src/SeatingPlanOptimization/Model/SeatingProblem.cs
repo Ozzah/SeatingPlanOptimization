@@ -14,6 +14,8 @@ namespace Ozzah.SeatingPlanOptimization.Model
 		public Variable? PoorestGuestReward { get; set; }
 		public Variable[]? GuestReward { get; set; }
 
+		public Variable[]? TableUsed { get; set; }
+
 		HashSet<Constraint> Constraints { get; } = new();
 
 		public SeatingProblem(MixedIntegerSolver solverType)

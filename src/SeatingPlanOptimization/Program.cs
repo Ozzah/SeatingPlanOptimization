@@ -124,6 +124,7 @@ namespace Ozzah.SeatingPlanOptimization
 		{
 			var problem = new SeatingProblem(options.SolverType);
 
+			CreateTableUsageVariables(tables, problem);
 			CreateGuestToTableVariables(tables, guests, problem);
 			CreateTableCapacityConstraints(tables, guests, problem);
 			CreateGuestAssignmentConstraints(tables, guests, problem);
@@ -145,6 +146,7 @@ namespace Ozzah.SeatingPlanOptimization
 		{
 			var problem = new SeatingProblem(options.SolverType);
 
+			CreateTableUsageVariables(tables, problem);
 			CreateGuestToTableVariables(tables, guests, problem);
 			CreateTableCapacityConstraints(tables, guests, problem);
 			CreateGuestAssignmentConstraints(tables, guests, problem);
@@ -180,6 +182,15 @@ namespace Ozzah.SeatingPlanOptimization
 			}
 		}
 
+		static void CreateTableUsageVariables(IList<Table> tables, SeatingProblem problem)
+		{
+			problem.TableUsed = new Variable[tables.Count];
+			for (var k = 0; k < tables.Count; k++)
+			{
+				problem.TableUsed[k] = problem.Solver.MakeBoolVar($"T_{k}");
+			}
+		}
+
 		static void CreateTableCapacityConstraints(
 			IList<Table> tables,
 			IList<Guest> guests,
@@ -187,11 +198,20 @@ namespace Ozzah.SeatingPlanOptimization
 		{
 			for (var k = 0; k < tables.Count; k++)
 			{
-				var constraint = problem.MakeConstraint(tables[k].MinimumGuests, tables[k].MaximumGuests, $"__Table_{k}");
+				var minConstraint = problem.MakeConstraint(0.0, double.PositiveInfinity, $"__TableMin_{k}");
+				minConstraint.SetCoefficient(problem.TableUsed![k], -tables[k].MinimumGuests);
 
 				for (var j = 0; j < guests.Count; j++)
 				{
-					constraint.SetCoefficient(problem.GuestToTable![j, k], 1.0);
+					minConstraint.SetCoefficient(problem.GuestToTable![j, k], 1.0);
+				}
+
+				var maxConstraint = problem.MakeConstraint(double.NegativeInfinity, 0.0, $"__TableMax_{k}");
+				maxConstraint.SetCoefficient(problem.TableUsed![k], -tables[k].MaximumGuests);
+
+				for (var j = 0; j < guests.Count; j++)
+				{
+					maxConstraint.SetCoefficient(problem.GuestToTable![j, k], 1.0);
 				}
 			}
 		}
@@ -327,12 +347,12 @@ namespace Ozzah.SeatingPlanOptimization
 
 					for (var k = 0; k < tables.Count; k++)
 					{
-						var _i = Math.Min(i, j);
-						var _j = Math.Max(i, j);
+						var iMin = Math.Min(i, j);
+						var jMax = Math.Max(i, j);
 
 						guestConstraint.SetCoefficient(
-							problem.GuestWithGuestToTable![_i, _j, k],
-							-pairingCoefficients[(guests[_i], guests[_j])]);
+							problem.GuestWithGuestToTable![iMin, jMax, k],
+							-pairingCoefficients[(guests[iMin], guests[jMax])]);
 					}
 				}
 
@@ -352,6 +372,13 @@ namespace Ozzah.SeatingPlanOptimization
 			SeatingProblem problem)
 		{
 			var hint = new Dictionary<Variable, double>();
+
+			for (var k = 0; k < tables.Count; k++)
+			{
+				hint.Add(
+					problem.TableUsed![k],
+					phase1Problem.TableUsed![k].SolutionValue() > 0.5 ? 1.0 : 0.0);
+			}
 
 			for (var j = 0; j < guests.Count; j++)
 			{
@@ -425,12 +452,19 @@ namespace Ozzah.SeatingPlanOptimization
 			using var writer = new StreamWriter(resultsPath);
 			for (var k = 0; k < tables.Count; k++)
 			{
+				if (problem.TableUsed![k].SolutionValue() < 0.5)
+				{
+					writer.WriteLine($"TABLE {k + 1} (UNUSED)");
+					writer.WriteLine();
+					continue;
+				}
+
 				var tableValue = 0.0;
 
 				var tableBuilder = new StringBuilder();
 				for (var j = 0; j < guests.Count; j++)
 				{
-					if (problem.GuestToTable![j, k].SolutionValue() > 0.9)
+					if (problem.GuestToTable![j, k].SolutionValue() > 0.5)
 					{
 						var guestValue = 0.0;
 

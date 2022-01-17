@@ -55,7 +55,10 @@ See an [Example Problem](./example/EXAMPLE.md).
 
 ### Tables File
 
-You will need to create a tab-separated tables file that describes the minimum and maximum number of guests for each table. The tables file should have a header row, and the first two columns should be the minimum and maximum number of guests, respectively. Any additional columns are ignored.
+You will need to create a tab-separated tables file that describes the minimum and maximum number of guests for each table.
+The tables file should have a header row, and the first two columns should be the minimum and maximum number of guests, respectively.
+Any additional columns are ignored.
+You can specify as many tables as you like; any tables that are not used in the final solution will be labelled as such in the results file.
 
 Example:
 
