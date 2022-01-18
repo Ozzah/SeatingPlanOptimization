@@ -42,6 +42,13 @@ namespace Ozzah.SeatingPlanOptimization
 		public long TimeLimitMinutes { get; set; }
 
 		[Option(
+			longName: "BreakSymmetry",
+			Required = false,
+			Default = true,
+			HelpText = "Whether to introduce symmetry-breaking constraints for identical tables")]
+		public bool BreakSymmetry { get; set; }
+
+		[Option(
 			longName: "PhaseOneResultsFile",
 			Required = false,
 			Default = null,

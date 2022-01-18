@@ -34,6 +34,8 @@ You will need to specify some additional arguments when running the program:
 
 `--TimeLimit`          (Default: 60) The time limit (minutes) per phase for optimization; use 0 for no limit
 
+`--BreakSymmetry`      (Default: true) Whether to introduce symmetry-breaking constraints for identical tables
+
 `--PhaseOneResultsFile` The path to write the phase 1 results
 
 `-r`, `--ResultsFile`  (Default: results.txt) Tha path to write the phase 2 (final) results

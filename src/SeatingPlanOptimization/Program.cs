@@ -130,6 +130,11 @@ namespace Ozzah.SeatingPlanOptimization
 			CreateGuestAssignmentConstraints(tables, guests, problem);
 			CreateLinearizationScheme(tables, guests, problem);
 
+			if (options.BreakSymmetry)
+			{
+				CreateSymmetryBreakingConstraints(tables, guests, pairingCoefficients, problem);
+			}
+
 			CreateObjectiveFunctionPhase1(tables, guests, pairingCoefficients, problem);
 
 			ConfigureSolver(options, problem);
@@ -151,6 +156,12 @@ namespace Ozzah.SeatingPlanOptimization
 			CreateTableCapacityConstraints(tables, guests, problem);
 			CreateGuestAssignmentConstraints(tables, guests, problem);
 			CreateLinearizationScheme(tables, guests, problem);
+
+			if (options.BreakSymmetry)
+			{
+				CreateSymmetryBreakingConstraints(tables, guests, pairingCoefficients, problem);
+			}
+
 			RestrictPhase2WithRespectToPhase1Objective(
 				tables,
 				guests,
@@ -270,6 +281,44 @@ namespace Ozzah.SeatingPlanOptimization
 						linearizationConstraint3.SetCoefficient(problem.GuestWithGuestToTable[i, j, k], 1.0);
 						linearizationConstraint3.SetCoefficient(problem.GuestToTable[i, k], -1.0);
 						linearizationConstraint3.SetCoefficient(problem.GuestToTable[j, k], -1.0);
+					}
+				}
+			}
+		}
+
+		static void CreateSymmetryBreakingConstraints(
+			IList<Table> tables,
+			IList<Guest> guests,
+			IDictionary<(Guest, Guest), double> pairingCoefficients,
+			SeatingProblem problem)
+		{
+			for (var k1 = 0; k1 < tables.Count; k1++)
+			{
+				for (var k2 = k1 + 1; k2 < tables.Count; k2++)
+				{
+					if (tables[k1].MinimumGuests != tables[k2].MinimumGuests ||
+						tables[k1].MaximumGuests != tables[k2].MaximumGuests)
+					{
+						continue;
+					}
+
+					var constraint1 = problem.Solver.MakeConstraint(0.0, double.PositiveInfinity, $"__Symm1_{k1}_{k2}");
+					constraint1.SetCoefficient(problem.TableUsed![k1], 1.0);
+					constraint1.SetCoefficient(problem.TableUsed![k2], -1.0);
+
+					var constraint2 = problem.Solver.MakeConstraint(0.0, double.PositiveInfinity, $"__Symm2_{k1}_{k2}");
+					for (var i = 0; i < guests.Count; i++)
+					{
+						for (var j = i + 1; j < guests.Count; j++)
+						{
+							constraint2.SetCoefficient(
+								problem.GuestWithGuestToTable![i, j, k1],
+								pairingCoefficients[(guests[i], guests[j])]);
+
+							constraint2.SetCoefficient(
+								problem.GuestWithGuestToTable![i, j, k2],
+								-pairingCoefficients[(guests[i], guests[j])]);
+						}
 					}
 				}
 			}
