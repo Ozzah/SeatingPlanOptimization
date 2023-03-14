@@ -7,10 +7,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 	ProjectSection(SolutionItems) = preProject
 		..\.gitignore = ..\.gitignore
 		..\README.md = ..\README.md
-		..\example\EXAMPLE.md = ..\example\EXAMPLE.md
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeatingPlanOptimization", "SeatingPlanOptimization\SeatingPlanOptimization.csproj", "{E8CE0115-DE6C-4EE4-89AB-7E2E15BB04E5}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Example", "Example", "{FC2E33A1-4345-4F12-A25C-1DF7E03FF413}"
+	ProjectSection(SolutionItems) = preProject
+		..\example\EXAMPLE.md = ..\example\EXAMPLE.md
+		..\example\guests.txt = ..\example\guests.txt
+		..\example\tables.txt = ..\example\tables.txt
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -25,5 +31,8 @@ Global
 		{E8CE0115-DE6C-4EE4-89AB-7E2E15BB04E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E8CE0115-DE6C-4EE4-89AB-7E2E15BB04E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E8CE0115-DE6C-4EE4-89AB-7E2E15BB04E5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FC2E33A1-4345-4F12-A25C-1DF7E03FF413} = {64E13E6C-79B1-4F6C-A3D4-A29A97727A7A}
 	EndGlobalSection
 EndGlobal
