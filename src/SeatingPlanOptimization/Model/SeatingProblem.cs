@@ -1,6 +1,4 @@
-﻿using Google.OrTools.LinearSolver;
-
-namespace Ozzah.SeatingPlanOptimization.Model;
+﻿namespace Ozzah.SeatingPlanOptimization.Model;
 
 public class SeatingProblem
 {

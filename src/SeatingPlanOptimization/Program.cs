@@ -1,6 +1,5 @@
 ﻿using System.Text;
 using CommandLine;
-using Google.OrTools.LinearSolver;
 using Ozzah.SeatingPlanOptimization.Model;
 
 namespace Ozzah.SeatingPlanOptimization;
